@@ -40,6 +40,152 @@ void buildScatterV(int rows, int cols, int size,
 }
 
 // ============================================================
+//  GAME OF LIFE
+// ============================================================
+vector<int> game_of_life(int rows, int cols, int iterations,
+    const vector<int>& initialGrid,
+    MPI_Comm comm)
+{
+    int rank, size;
+    MPI_Comm_rank(comm, &rank);
+    MPI_Comm_size(comm, &size);
+
+    // Process organization: split by parity
+    int color = rank % 2;
+    MPI_Comm parity_comm;
+    MPI_Comm_split(comm, color, rank, &parity_comm);
+
+    // Distribute rows
+    Block block = getBlock(rank, size, rows);
+    int localRows = block.numRows;
+
+    // +2 for ghost rows
+    vector<int> localGrid((localRows + 2) * cols, 0);
+    vector<int> newGrid((localRows + 2) * cols, 0);
+
+    // Build scatter arrays
+    vector<int> sendcounts(size), displs(size);
+    {
+        int offset = 0;
+        for (int p = 0; p < size; p++) {
+            Block b = getBlock(p, size, rows);
+            sendcounts[p] = b.numRows * cols;
+            displs[p] = offset;
+            offset += b.numRows * cols;
+        }
+    }
+
+    // ✅ Scatter the loaded pattern (not random)
+    MPI_Scatterv(
+        rank == 0 ? initialGrid.data() : nullptr,
+        sendcounts.data(), displs.data(), MPI_INT,
+        &localGrid[1 * cols],
+        localRows * cols,
+        MPI_INT, 0, comm
+    );
+
+    // Print initial state
+    if (rank == 0) {
+        cout << "\n=== Initial State (Iteration 0) ===\n";
+        for (int i = 0; i < rows; i++) {
+            for (int j = 0; j < cols; j++)
+                cout << initialGrid[i * cols + j] << " ";
+            cout << "\n";
+        }
+        cout << "\n";
+    }
+
+    int upRank = (rank == 0) ? MPI_PROC_NULL : rank - 1;
+    int downRank = (rank == size - 1) ? MPI_PROC_NULL : rank + 1;
+
+    // Full grid buffer for gathering each iteration
+    vector<int> fullGrid(rows * cols, 0);
+
+    for (int iter = 0; iter < iterations; iter++) {
+
+        // Non-blocking ghost row exchange
+        MPI_Request reqs[4];
+
+        MPI_Isend(&localGrid[1 * cols], cols, MPI_INT,
+            upRank, TAG_DOWN, comm, &reqs[0]);
+        MPI_Irecv(&localGrid[0], cols, MPI_INT,
+            upRank, TAG_UP, comm, &reqs[1]);
+        MPI_Isend(&localGrid[localRows * cols], cols, MPI_INT,
+            downRank, TAG_UP, comm, &reqs[2]);
+        MPI_Irecv(&localGrid[(localRows + 1) * cols], cols, MPI_INT,
+            downRank, TAG_DOWN, comm, &reqs[3]);
+
+        // Compute interior rows while ghost rows travel
+        for (int i = 2; i <= localRows - 1; i++) {
+            for (int j = 0; j < cols; j++) {
+                int alive = 0;
+                for (int di = -1; di <= 1; di++) {
+                    for (int dj = -1; dj <= 1; dj++) {
+                        if (di == 0 && dj == 0) continue;
+                        int ni = i + di;
+                        int nj = (j + dj + cols) % cols;
+                        alive += localGrid[ni * cols + nj];
+                    }
+                }
+                int cell = localGrid[i * cols + j];
+                if (cell == 1 && (alive == 2 || alive == 3)) newGrid[i * cols + j] = 1;
+                else if (cell == 0 && alive == 3)                 newGrid[i * cols + j] = 1;
+                else                                               newGrid[i * cols + j] = 0;
+            }
+        }
+
+        // Wait for ghost rows
+        MPI_Waitall(4, reqs, MPI_STATUSES_IGNORE);
+
+        // Compute boundary rows
+        for (int i : {1, localRows}) {
+            for (int j = 0; j < cols; j++) {
+                int alive = 0;
+                for (int di = -1; di <= 1; di++) {
+                    for (int dj = -1; dj <= 1; dj++) {
+                        if (di == 0 && dj == 0) continue;
+                        int ni = i + di;
+                        int nj = (j + dj + cols) % cols;
+                        alive += localGrid[ni * cols + nj];
+                    }
+                }
+                int cell = localGrid[i * cols + j];
+                if (cell == 1 && (alive == 2 || alive == 3)) newGrid[i * cols + j] = 1;
+                else if (cell == 0 && alive == 3)                 newGrid[i * cols + j] = 1;
+                else                                               newGrid[i * cols + j] = 0;
+            }
+        }
+
+        swap(localGrid, newGrid);
+
+        // Gather and print this iteration
+        MPI_Gatherv(
+            &localGrid[1 * cols],
+            localRows * cols,
+            MPI_INT,
+            rank == 0 ? fullGrid.data() : nullptr,
+            sendcounts.data(), displs.data(),
+            MPI_INT, 0, comm
+        );
+
+        if (rank == 0) {
+            cout << "=== Iteration " << iter + 1 << " ===\n";
+            for (int i = 0; i < rows; i++) {
+                for (int j = 0; j < cols; j++)
+                    cout << fullGrid[i * cols + j] << " ";
+                cout << "\n";
+            }
+            cout << "\n";
+        }
+
+        MPI_Barrier(comm);
+    }
+
+    MPI_Comm_free(&parity_comm);
+    return fullGrid;
+}
+
+// ============================================================
 //  HEAT DIFFUSION
 // ============================================================
 vector<double> heat_diffusion(int rows, int cols, int iterations,
@@ -49,33 +195,26 @@ vector<double> heat_diffusion(int rows, int cols, int iterations,
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
 
-    // Process organization: boundary vs interior ranks
     int isBoundary = (rank == 0 || rank == size - 1) ? 0 : 1;
     MPI_Comm boundary_comm;
     MPI_Comm_split(comm, isBoundary, rank, &boundary_comm);
 
-    // Distribute rows evenly across processes
     Block block = getBlock(rank, size, rows);
     int localRows = block.numRows;
 
-    // +2 for ghost rows (top and bottom)
-    int totalLocalRows = localRows + 2;
-    vector<double> localGrid(totalLocalRows * cols, 0.0);
-    vector<double> newGrid(totalLocalRows * cols, 0.0);
+    vector<double> localGrid((localRows + 2) * cols, 0.0);
+    vector<double> newGrid((localRows + 2) * cols, 0.0);
 
-    // ── Initialize and scatter grid ──────────────────────────
     vector<double> fullGrid;
     if (rank == 0) {
         fullGrid.resize(rows * cols, 0.0);
-
-        // Fixed boundary conditions
         for (int j = 0; j < cols; j++) {
-            fullGrid[0 * cols + j] = 100.0; // top
-            fullGrid[(rows - 1) * cols + j] = 100.0; // bottom
+            fullGrid[0 * cols + j] = 100.0;
+            fullGrid[(rows - 1) * cols + j] = 100.0;
         }
         for (int i = 0; i < rows; i++) {
-            fullGrid[i * cols + 0] = 50.0;  // left
-            fullGrid[i * cols + (cols - 1)] = 50.0;  // right
+            fullGrid[i * cols + 0] = 50.0;
+            fullGrid[i * cols + (cols - 1)] = 50.0;
         }
     }
 
@@ -98,14 +237,11 @@ vector<double> heat_diffusion(int rows, int cols, int iterations,
         MPI_DOUBLE, 0, comm
     );
 
-    // Neighbour ranks (MPI_PROC_NULL = no neighbour at boundary)
     int upRank = (rank == 0) ? MPI_PROC_NULL : rank - 1;
     int downRank = (rank == size - 1) ? MPI_PROC_NULL : rank + 1;
 
-    // ── Iteration loop ───────────────────────────────────────
     for (int iter = 0; iter < iterations; iter++) {
 
-        // Non-blocking ghost row exchange
         MPI_Request reqs[4];
 
         MPI_Isend(&localGrid[1 * cols], cols, MPI_DOUBLE,
@@ -117,7 +253,6 @@ vector<double> heat_diffusion(int rows, int cols, int iterations,
         MPI_Irecv(&localGrid[(localRows + 1) * cols], cols, MPI_DOUBLE,
             downRank, TAG_DOWN, comm, &reqs[3]);
 
-        // Compute interior rows while ghost rows travel
         for (int i = 2; i <= localRows - 1; i++) {
             for (int j = 1; j < cols - 1; j++) {
                 double center = localGrid[i * cols + j];
@@ -126,15 +261,12 @@ vector<double> heat_diffusion(int rows, int cols, int iterations,
                 double left = localGrid[i * cols + (j - 1)];
                 double right = localGrid[i * cols + (j + 1)];
                 newGrid[i * cols + j] =
-                    center + alpha * (up + down + left + right
-                        - 4.0 * center);
+                    center + alpha * (up + down + left + right - 4.0 * center);
             }
         }
 
-        // Wait for ghost rows to arrive
         MPI_Waitall(4, reqs, MPI_STATUSES_IGNORE);
 
-        // Compute boundary rows (need ghost rows)
         for (int i : {1, localRows}) {
             for (int j = 1; j < cols - 1; j++) {
                 double center = localGrid[i * cols + j];
@@ -143,12 +275,10 @@ vector<double> heat_diffusion(int rows, int cols, int iterations,
                 double left = localGrid[i * cols + (j - 1)];
                 double right = localGrid[i * cols + (j + 1)];
                 newGrid[i * cols + j] =
-                    center + alpha * (up + down + left + right
-                        - 4.0 * center);
+                    center + alpha * (up + down + left + right - 4.0 * center);
             }
         }
 
-        // Re-enforce fixed boundary conditions
         if (rank == 0)
             for (int j = 0; j < cols; j++)
                 newGrid[1 * cols + j] = 100.0;
@@ -165,7 +295,6 @@ vector<double> heat_diffusion(int rows, int cols, int iterations,
         swap(localGrid, newGrid);
     }
 
-    // ── Gather final grid to root ────────────────────────────
     MPI_Gatherv(
         &localGrid[1 * cols],
         localRows * cols,
@@ -175,7 +304,6 @@ vector<double> heat_diffusion(int rows, int cols, int iterations,
         MPI_DOUBLE, 0, comm
     );
 
-    // Print sample on root
     if (rank == 0) {
         cout << "\n[Heat Diffusion] Final grid sample (top-left 5x5):\n";
         int printRows = min(5, rows);
@@ -188,8 +316,6 @@ vector<double> heat_diffusion(int rows, int cols, int iterations,
     }
 
     MPI_Comm_free(&boundary_comm);
-
-    // ✅ Return grid — only rank 0 has data, others return empty
     return fullGrid;
 }
 
@@ -204,12 +330,10 @@ void matrix_multiply_2D(int N, int K, int M,
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
 
-    // Process organization: coordinator vs workers
     int color = (rank == 0) ? 0 : 1;
     MPI_Comm group_comm;
     MPI_Comm_split(comm, color, rank, &group_comm);
 
-    // Broadcast full B to all processes
     vector<double> fullB(K * M);
     if (rank == 0)
         copy(B, B + K * M, fullB.begin());
@@ -218,7 +342,6 @@ void matrix_multiply_2D(int N, int K, int M,
     int numWorkers = size - 1;
     int CHUNK_ROWS = max(1, N / (4 * numWorkers));
 
-    // ── Coordinator ──────────────────────────────────────────
     if (rank == 0) {
         cout << "[Coordinator] Master-Worker Matrix Multiply\n";
         cout << "[Coordinator] Workers: " << numWorkers
@@ -254,8 +377,7 @@ void matrix_multiply_2D(int N, int K, int M,
             if (nextRow < N) {
                 int newChunk = min(CHUNK_ROWS, N - nextRow);
                 int header[2] = { nextRow, newChunk };
-                MPI_Send(header, 2, MPI_INT,
-                    workerRank, TAG_WORK, comm);
+                MPI_Send(header, 2, MPI_INT, workerRank, TAG_WORK, comm);
                 MPI_Send(A + nextRow * K, newChunk * K,
                     MPI_DOUBLE, workerRank, TAG_WORK, comm);
                 nextRow += newChunk;
@@ -269,8 +391,6 @@ void matrix_multiply_2D(int N, int K, int M,
         }
         cout << "[Coordinator] All chunks processed\n";
     }
-
-    // ── Workers ──────────────────────────────────────────────
     else {
         while (true) {
             MPI_Status status;

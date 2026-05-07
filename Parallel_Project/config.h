@@ -7,7 +7,10 @@ struct Matrix {
     int rows, cols;
     std::vector<double> data;
 };
-
+struct IntMatrix {
+    int rows, cols;
+    std::vector<int> data;
+};
 enum AlgorithmType {
     HEAT_DIFFUSION = 1,
     GAME_OF_LIFE = 2,

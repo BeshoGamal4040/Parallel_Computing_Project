@@ -50,7 +50,68 @@ Matrix readMatrixFromFile(const std::string& filename) {
     return mat;
 }
 
+
+IntMatrix readIntMatrixFromFile(const std::string& filename) {
+    std::ifstream file(filename);
+
+    if (!file) {
+        std::cerr << "Error opening file: " << filename << std::endl;
+        exit(1);
+    }
+
+    std::vector<int> values;
+    int cols = 0;
+    int rows = 0;
+    std::string line;
+
+    while (std::getline(file, line)) {
+        if (line.empty()) continue;
+
+        std::istringstream ss(line);
+        int val;
+        int lineCount = 0;
+
+        while (ss >> val) {
+            if (val != 0 && val != 1) {
+                std::cerr << "Error: Game of Life file must contain only 0 and 1\n";
+                exit(1);
+            }
+            values.push_back(val);
+            lineCount++;
+        }
+
+        if (rows == 0)
+            cols = lineCount;
+        else if (lineCount != cols) {
+            std::cerr << "Error: inconsistent row sizes in pattern file\n";
+            exit(1);
+        }
+        rows++;
+    }
+
+    if (rows == 0 || cols == 0) {
+        std::cerr << "Error: empty or invalid pattern file\n";
+        exit(1);
+    }
+
+    IntMatrix mat;
+    mat.rows = rows;
+    mat.cols = cols;
+    mat.data = values;
+    return mat;
+}
+
 void writeMatrixToFile(const std::string& filename, double* data, int rows, int cols) {
+    std::ofstream file(filename);
+    for (int i = 0; i < rows; i++) {
+        for (int j = 0; j < cols; j++)
+            file << data[i * cols + j] << " ";
+        file << "\n";
+    }
+    file.close();
+}
+
+void writeIntMatrixToFile(const std::string& filename, int* data, int rows, int cols) {
     std::ofstream file(filename);
     for (int i = 0; i < rows; i++) {
         for (int j = 0; j < cols; j++)

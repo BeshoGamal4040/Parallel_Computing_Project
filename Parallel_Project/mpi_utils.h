@@ -20,3 +20,7 @@ void matrix_multiply_2D(int N, int K, int M,
 
 std::vector<double> heat_diffusion(int rows, int cols, int iterations,
     double alpha, MPI_Comm comm);
+
+std::vector<int> game_of_life(int rows, int cols, int iterations,
+    const std::vector<int>& initialGrid,
+    MPI_Comm comm);

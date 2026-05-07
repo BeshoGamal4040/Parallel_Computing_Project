@@ -26,7 +26,8 @@ int main(int argc, char** argv) {
     int iterations = 0;
     double alpha = 0.1;
     Matrix A_mat, B_mat;
-    string fileA, fileB;
+    IntMatrix GOL_mat;
+    string fileA, fileB, fileGOL;
     double* A_data = nullptr;
     double* B_data = nullptr;
     double* C_data = nullptr;
@@ -53,6 +54,19 @@ int main(int argc, char** argv) {
             cout << "Enter diffusion coefficient alpha (e.g. 0.1):\n";
             cin >> alpha;
         }
+        else if (choice == GAME_OF_LIFE) {
+            cout << "Enter pattern file name (e.g. glider.txt):\n";
+            cin >> fileGOL;
+            cout << "Enter number of iterations:\n";
+            cin >> iterations;
+
+            
+            GOL_mat = readIntMatrixFromFile(fileGOL);
+            rows = GOL_mat.rows;
+            cols = GOL_mat.cols;
+
+            cout << "Pattern loaded: " << rows << "x" << cols << " grid\n";
+        }
         else if (choice == MATRIX_MULTIPLICATION) {
             cout << "Enter file name for Matrix A:\n";
             cin >> fileA;
@@ -76,7 +90,6 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Broadcast all inputs to every process
     MPI_Bcast(&choice, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(&rows, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(&cols, 1, MPI_INT, 0, MPI_COMM_WORLD);
@@ -105,7 +118,6 @@ int main(int argc, char** argv) {
         MPI_Barrier(MPI_COMM_WORLD);
         end = MPI_Wtime();
 
-        // ✅ Only rank 0 does I/O — no cin inside MPI functions
         if (rank == 0) {
             cout << "Execution Time: " << end - start << " seconds\n";
 
@@ -115,6 +127,36 @@ int main(int argc, char** argv) {
 
             writeMatrixToFile(outputFile, result.data(), rows, cols);
             cout << "Result written to " << outputFile << "\n";
+        }
+    }
+
+    // ── Game of Life ────────────────────────────────────────
+    if (choice == GAME_OF_LIFE) {
+
+       
+        vector<int> initialGrid(rows * cols, 0);
+        if (rank == 0)
+            initialGrid = GOL_mat.data;
+
+        MPI_Bcast(initialGrid.data(), rows * cols, MPI_INT, 0, MPI_COMM_WORLD);
+
+        start = MPI_Wtime();
+
+        vector<int> result = game_of_life(
+            rows, cols, iterations, initialGrid, MPI_COMM_WORLD);
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        end = MPI_Wtime();
+
+        if (rank == 0) {
+            cout << "\nTotal Execution Time: " << end - start << " seconds\n";
+
+            string outputFile;
+            cout << "Enter output file name for final grid:\n";
+            cin >> outputFile;
+
+            writeIntMatrixToFile(outputFile, result.data(), rows, cols);
+            cout << "Final grid written to " << outputFile << "\n";
         }
     }
 

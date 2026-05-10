@@ -12,7 +12,6 @@ struct IntMatrix {
     std::vector<int> data;
 };
 enum AlgorithmType {
-    HEAT_DIFFUSION = 1,
-    GAME_OF_LIFE = 2,
-    MATRIX_MULTIPLICATION = 3
+    GAME_OF_LIFE = 1,
+    MATRIX_MULTIPLICATION = 2
 };

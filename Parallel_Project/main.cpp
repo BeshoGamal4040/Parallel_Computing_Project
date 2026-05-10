@@ -1,5 +1,6 @@
 #include <mpi.h>
 #include <iostream>
+#include <limits>
 #include "config.h"
 #include "io_utils.h"
 #include "mpi_utils.h"
@@ -21,64 +22,165 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    int choice = 0;
-    int rows = 0, cols = 0;
-    int iterations = 0;
-    double alpha = 0.1;
-    Matrix A_mat, B_mat;
-    IntMatrix GOL_mat;
-    string fileA, fileB, fileGOL;
-    double* A_data = nullptr;
-    double* B_data = nullptr;
-    double* C_data = nullptr;
-
     double start, end;
 
-    if (rank == 0) {
-        cout << "============================\n";
-        cout << "MPI Parallel Processing System\n";
-        cout << "Running on " << size << " processes\n";
-        cout << "============================\n";
+    while (true) {
 
-        cout << "Choose Algorithm:\n";
-        cout << "1. Heat Diffusion\n";
-        cout << "2. Game of Life\n";
-        cout << "3. Matrix Multiplication\n";
-        cin >> choice;
+        int choice = 0;
+        int rows = 0, cols = 0;
+        int iterations = 0;
+        Matrix A_mat, B_mat;
+        IntMatrix GOL_mat;
+        string fileA, fileB, fileGOL;
+        double* A_data = nullptr;
+        double* B_data = nullptr;
+        double* C_data = nullptr;
+        bool validInput = true;
 
-        if (choice == HEAT_DIFFUSION) {
-            cout << "Enter grid rows and cols:\n";
-            cin >> rows >> cols;
-            cout << "Enter number of iterations:\n";
-            cin >> iterations;
-            cout << "Enter diffusion coefficient alpha (e.g. 0.1):\n";
-            cin >> alpha;
-        }
-        else if (choice == GAME_OF_LIFE) {
-            cout << "Enter pattern file name (e.g. glider.txt):\n";
-            cin >> fileGOL;
-            cout << "Enter number of iterations:\n";
-            cin >> iterations;
+        if (rank == 0) {
+            cout << "\n============================\n";
+            cout << "MPI Parallel Processing System\n";
+            cout << "Running on " << size << " processes\n";
+            cout << "============================\n";
+
+            cout << "Choose Algorithm:\n";
+            cout << "1. Game of Life\n";
+            cout << "2. Matrix Multiplication\n";
+            cout << "3. Quit\n";
 
             
-            GOL_mat = readIntMatrixFromFile(fileGOL);
-            rows = GOL_mat.rows;
-            cols = GOL_mat.cols;
-
-            cout << "Pattern loaded: " << rows << "x" << cols << " grid\n";
+            while (true) {
+                cout << "> ";
+                if (!(cin >> choice)) {
+                    cout << "[Error] Invalid input. Please enter 1, 2, or 3.\n";
+                    cin.clear();
+                    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                    continue;
+                }
+                if (choice < 1 || choice > 3) {
+                    cout << "[Error] Please enter 1, 2, or 3.\n";
+                    continue;
+                }
+                break; 
+            }
         }
-        else if (choice == MATRIX_MULTIPLICATION) {
-            cout << "Enter file name for Matrix A:\n";
-            cin >> fileA;
-            cout << "Enter file name for Matrix B:\n";
-            cin >> fileB;
 
-            A_mat = readMatrixFromFile(fileA);
-            B_mat = readMatrixFromFile(fileB);
+        MPI_Bcast(&choice, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-            if (A_mat.cols != B_mat.rows) {
-                cout << "Error: matrix Multiplication can't be computed.\n";
-                MPI_Abort(MPI_COMM_WORLD, 1);
+        
+        if (choice == 3) {
+            if (rank == 0)
+                cout << "\n[INFO] Goodbye!\n";
+            break;
+        }
+
+        
+        if (choice == GAME_OF_LIFE && rank == 0) {
+
+            
+            while (true) {
+                cout << "Enter pattern file name (e.g. glider.txt):\n> ";
+                cin >> fileGOL;
+                try {
+                    GOL_mat = readIntMatrixFromFile(fileGOL);
+                    rows = GOL_mat.rows;
+                    cols = GOL_mat.cols;
+                    cout << "Pattern loaded: " << rows << "x" << cols << " grid\n";
+                    break; 
+                }
+                catch (const exception& e) {
+                    cout << "[Error] " << e.what() << "\n";
+                    cout << "[Info] Please try again.\n";
+                }
+            }
+
+            
+            while (true) {
+                cout << "Enter number of iterations (must be > 0):\n> ";
+                if (!(cin >> iterations) || iterations <= 0) {
+                    cout << "[Error] Iterations must be a positive integer.\n";
+                    cin.clear();
+                    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                    continue;
+                }
+                break;
+            }
+        }
+
+        
+        else if (choice == MATRIX_MULTIPLICATION && rank == 0) {
+
+            
+            while (true) {
+                cout << "Enter file name for Matrix A:\n> ";
+                cin >> fileA;
+                try {
+                    A_mat = readMatrixFromFile(fileA);
+                    cout << "Matrix A loaded: "
+                        << A_mat.rows << "x" << A_mat.cols << "\n";
+                    break;
+                }
+                catch (const exception& e) {
+                    cout << "[Error] " << e.what() << "\n";
+                    cout << "[Info] Please try again.\n";
+                }
+            }
+
+            
+            while (true) {
+                cout << "Enter file name for Matrix B:\n> ";
+                cin >> fileB;
+                try {
+                    B_mat = readMatrixFromFile(fileB);
+                    cout << "Matrix B loaded: "
+                        << B_mat.rows << "x" << B_mat.cols << "\n";
+                    break;
+                }
+                catch (const exception& e) {
+                    cout << "[Error] " << e.what() << "\n";
+                    cout << "[Info] Please try again.\n";
+                }
+            }
+
+            
+            while (A_mat.cols != B_mat.rows) {
+                cout << "[Error] Incompatible dimensions: A is "
+                    << A_mat.rows << "x" << A_mat.cols
+                    << " but B is "
+                    << B_mat.rows << "x" << B_mat.cols << "\n";
+                cout << "[Error] A cols (" << A_mat.cols
+                    << ") must equal B rows (" << B_mat.rows << ").\n";
+
+                
+                while (true) {
+                    cout << "Enter file name for Matrix A:\n> ";
+                    cin >> fileA;
+                    try {
+                        A_mat = readMatrixFromFile(fileA);
+                        cout << "Matrix A loaded: "
+                            << A_mat.rows << "x" << A_mat.cols << "\n";
+                        break;
+                    }
+                    catch (const exception& e) {
+                        cout << "[Error] " << e.what() << "\n";
+                        cout << "[Info] Please try again.\n";
+                    }
+                }
+
+                while (true) {
+                    cout << "Enter file name for Matrix B:\n> ";
+                    cin >> fileB;
+                    try {
+                        B_mat = readMatrixFromFile(fileB);
+                        cout << "Matrix B loaded: "
+                            << B_mat.rows << "x" << B_mat.cols << "\n";
+                        break;
+                    }
+                    catch (const exception& e) {
+                        cout << "[Error] " << e.what() << "\n";
+                        cout << "[Info] Please try again.\n";
+                    }
+                }
             }
 
             cout << "A: " << A_mat.rows << "x" << A_mat.cols
@@ -88,114 +190,80 @@ int main(int argc, char** argv) {
             B_data = B_mat.data.data();
             C_data = new double[A_mat.rows * B_mat.cols]();
         }
-    }
 
-    MPI_Bcast(&choice, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&rows, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&cols, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&iterations, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&alpha, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        
+        MPI_Bcast(&rows, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        MPI_Bcast(&cols, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        MPI_Bcast(&iterations, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-    int N = 0, Km = 0, Mc = 0;
-    if (rank == 0 && choice == MATRIX_MULTIPLICATION) {
-        N = A_mat.rows;
-        Km = A_mat.cols;
-        Mc = B_mat.cols;
-    }
-    MPI_Bcast(&N, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&Km, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&Mc, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    // ── Heat Diffusion ──────────────────────────────────────
-    if (choice == HEAT_DIFFUSION) {
-        start = MPI_Wtime();
-
-        vector<double> result = heat_diffusion(
-            rows, cols, iterations, alpha, MPI_COMM_WORLD);
-
-        MPI_Barrier(MPI_COMM_WORLD);
-        end = MPI_Wtime();
-
-        if (rank == 0) {
-            cout << "Execution Time: " << end - start << " seconds\n";
-
-            string outputFile;
-            cout << "Enter output file name:\n";
-            cin >> outputFile;
-
-            writeMatrixToFile(outputFile, result.data(), rows, cols);
-            cout << "Result written to " << outputFile << "\n";
+        int N = 0, Km = 0, Mc = 0;
+        if (rank == 0 && choice == MATRIX_MULTIPLICATION) {
+            N = A_mat.rows;
+            Km = A_mat.cols;
+            Mc = B_mat.cols;
         }
-    }
-
-    // ── Game of Life ────────────────────────────────────────
-    if (choice == GAME_OF_LIFE) {
-
-       
-        vector<int> initialGrid(rows * cols, 0);
-        if (rank == 0)
-            initialGrid = GOL_mat.data;
-
-        MPI_Bcast(initialGrid.data(), rows * cols, MPI_INT, 0, MPI_COMM_WORLD);
-
-        start = MPI_Wtime();
-
-        vector<int> result = game_of_life(
-            rows, cols, iterations, initialGrid, MPI_COMM_WORLD);
+        MPI_Bcast(&N, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        MPI_Bcast(&Km, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        MPI_Bcast(&Mc, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
         MPI_Barrier(MPI_COMM_WORLD);
-        end = MPI_Wtime();
 
-        if (rank == 0) {
-            cout << "\nTotal Execution Time: " << end - start << " seconds\n";
+        //  Run Game of Life 
+        if (choice == GAME_OF_LIFE) {
+            vector<int> initialGrid(rows * cols, 0);
+            if (rank == 0)
+                initialGrid = GOL_mat.data;
+            MPI_Bcast(initialGrid.data(), rows * cols, MPI_INT, 0, MPI_COMM_WORLD);
 
-            string outputFile;
-            cout << "Enter output file name for final grid:\n";
-            cin >> outputFile;
+            start = MPI_Wtime();
 
-            writeIntMatrixToFile(outputFile, result.data(), rows, cols);
-            cout << "Final grid written to " << outputFile << "\n";
-        }
-    }
+            vector<int> result = game_of_life(
+                rows, cols, iterations, initialGrid, MPI_COMM_WORLD);
 
-    // ── Matrix Multiplication ───────────────────────────────
-    if (choice == MATRIX_MULTIPLICATION) {
-        start = MPI_Wtime();
+            MPI_Barrier(MPI_COMM_WORLD);
+            end = MPI_Wtime();
 
-        matrix_multiply_2D(N, Km, Mc,
-            A_data, B_data, C_data,
-            MPI_COMM_WORLD);
+            if (rank == 0) {
+                cout << "\nTotal Execution Time: " << end - start << " seconds\n";
 
-        MPI_Barrier(MPI_COMM_WORLD);
-        end = MPI_Wtime();
+                string outputFile;
+                cout << "Enter output file name for final grid:\n> ";
+                cin >> outputFile;
 
-        if (rank == 0) {
-            cout << "Execution Time: " << end - start << " seconds\n";
-
-            if (N <= 5 && Mc <= 5) {
-                cout << "\nResult Matrix:\n";
-                for (int i = 0; i < N; i++) {
-                    for (int j = 0; j < Mc; j++)
-                        cout << C_data[i * Mc + j] << " ";
-                    cout << "\n";
-                }
+                writeIntMatrixToFile(outputFile, result.data(), rows, cols);
+                cout << "Final grid written to " << outputFile << "\n";
             }
-
-            string outputFile;
-            cout << "Enter output file name:\n";
-            cin >> outputFile;
-
-            writeMatrixToFile(outputFile, C_data, N, Mc);
-            cout << "Result written to " << outputFile << "\n";
-
-            delete[] C_data;
         }
-    }
 
-    if (rank == 0)
-        cout << "\n[INFO] Finished.\n";
+        //  Matrix Multiplication
+        if (choice == MATRIX_MULTIPLICATION) {
+            start = MPI_Wtime();
+
+            matrix_multiply_2D(N, Km, Mc,
+                A_data, B_data, C_data,
+                MPI_COMM_WORLD);
+
+            MPI_Barrier(MPI_COMM_WORLD);
+            end = MPI_Wtime();
+
+            if (rank == 0) {
+                cout << "Execution Time: " << end - start << " seconds\n";
+
+                string outputFile;
+                cout << "Enter output file name:\n> ";
+                cin >> outputFile;
+
+                writeMatrixToFile(outputFile, C_data, N, Mc);
+                cout << "Result written to " << outputFile << "\n";
+
+                delete[] C_data;
+                C_data = nullptr;
+            }
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+    } 
 
     MPI_Finalize();
     return 0;

@@ -39,9 +39,9 @@ void buildScatterV(int rows, int cols, int size,
     }
 }
 
-// ============================================================
+
 //  GAME OF LIFE
-// ============================================================
+
 vector<int> game_of_life(int rows, int cols, int iterations,
     const vector<int>& initialGrid,
     MPI_Comm comm)
@@ -50,20 +50,20 @@ vector<int> game_of_life(int rows, int cols, int iterations,
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
 
-    // Process organization: split by parity
+    
     int color = rank % 2;
     MPI_Comm parity_comm;
     MPI_Comm_split(comm, color, rank, &parity_comm);
 
-    // Distribute rows
+  
     Block block = getBlock(rank, size, rows);
     int localRows = block.numRows;
 
-    // +2 for ghost rows
+  
     vector<int> localGrid((localRows + 2) * cols, 0);
     vector<int> newGrid((localRows + 2) * cols, 0);
 
-    // Build scatter arrays
+    
     vector<int> sendcounts(size), displs(size);
     {
         int offset = 0;
@@ -75,7 +75,7 @@ vector<int> game_of_life(int rows, int cols, int iterations,
         }
     }
 
-    // ✅ Scatter the loaded pattern (not random)
+    
     MPI_Scatterv(
         rank == 0 ? initialGrid.data() : nullptr,
         sendcounts.data(), displs.data(), MPI_INT,
@@ -84,7 +84,7 @@ vector<int> game_of_life(int rows, int cols, int iterations,
         MPI_INT, 0, comm
     );
 
-    // Print initial state
+    
     if (rank == 0) {
         cout << "\n=== Initial State (Iteration 0) ===\n";
         for (int i = 0; i < rows; i++) {
@@ -98,12 +98,12 @@ vector<int> game_of_life(int rows, int cols, int iterations,
     int upRank = (rank == 0) ? MPI_PROC_NULL : rank - 1;
     int downRank = (rank == size - 1) ? MPI_PROC_NULL : rank + 1;
 
-    // Full grid buffer for gathering each iteration
+    
     vector<int> fullGrid(rows * cols, 0);
 
     for (int iter = 0; iter < iterations; iter++) {
 
-        // Non-blocking ghost row exchange
+        
         MPI_Request reqs[4];
 
         MPI_Isend(&localGrid[1 * cols], cols, MPI_INT,
@@ -115,7 +115,7 @@ vector<int> game_of_life(int rows, int cols, int iterations,
         MPI_Irecv(&localGrid[(localRows + 1) * cols], cols, MPI_INT,
             downRank, TAG_DOWN, comm, &reqs[3]);
 
-        // Compute interior rows while ghost rows travel
+        
         for (int i = 2; i <= localRows - 1; i++) {
             for (int j = 0; j < cols; j++) {
                 int alive = 0;
@@ -134,10 +134,10 @@ vector<int> game_of_life(int rows, int cols, int iterations,
             }
         }
 
-        // Wait for ghost rows
+       
         MPI_Waitall(4, reqs, MPI_STATUSES_IGNORE);
 
-        // Compute boundary rows
+       
         for (int i : {1, localRows}) {
             for (int j = 0; j < cols; j++) {
                 int alive = 0;
@@ -158,7 +158,7 @@ vector<int> game_of_life(int rows, int cols, int iterations,
 
         swap(localGrid, newGrid);
 
-        // Gather and print this iteration
+        
         MPI_Gatherv(
             &localGrid[1 * cols],
             localRows * cols,
@@ -185,143 +185,9 @@ vector<int> game_of_life(int rows, int cols, int iterations,
     return fullGrid;
 }
 
-// ============================================================
-//  HEAT DIFFUSION
-// ============================================================
-vector<double> heat_diffusion(int rows, int cols, int iterations,
-    double alpha, MPI_Comm comm)
-{
-    int rank, size;
-    MPI_Comm_rank(comm, &rank);
-    MPI_Comm_size(comm, &size);
 
-    int isBoundary = (rank == 0 || rank == size - 1) ? 0 : 1;
-    MPI_Comm boundary_comm;
-    MPI_Comm_split(comm, isBoundary, rank, &boundary_comm);
-
-    Block block = getBlock(rank, size, rows);
-    int localRows = block.numRows;
-
-    vector<double> localGrid((localRows + 2) * cols, 0.0);
-    vector<double> newGrid((localRows + 2) * cols, 0.0);
-
-    vector<double> fullGrid;
-    if (rank == 0) {
-        fullGrid.resize(rows * cols, 0.0);
-        for (int j = 0; j < cols; j++) {
-            fullGrid[0 * cols + j] = 100.0;
-            fullGrid[(rows - 1) * cols + j] = 100.0;
-        }
-        for (int i = 0; i < rows; i++) {
-            fullGrid[i * cols + 0] = 50.0;
-            fullGrid[i * cols + (cols - 1)] = 50.0;
-        }
-    }
-
-    vector<int> sendcounts(size), displs(size);
-    {
-        int offset = 0;
-        for (int p = 0; p < size; p++) {
-            Block b = getBlock(p, size, rows);
-            sendcounts[p] = b.numRows * cols;
-            displs[p] = offset;
-            offset += b.numRows * cols;
-        }
-    }
-
-    MPI_Scatterv(
-        rank == 0 ? fullGrid.data() : nullptr,
-        sendcounts.data(), displs.data(), MPI_DOUBLE,
-        &localGrid[1 * cols],
-        localRows * cols,
-        MPI_DOUBLE, 0, comm
-    );
-
-    int upRank = (rank == 0) ? MPI_PROC_NULL : rank - 1;
-    int downRank = (rank == size - 1) ? MPI_PROC_NULL : rank + 1;
-
-    for (int iter = 0; iter < iterations; iter++) {
-
-        MPI_Request reqs[4];
-
-        MPI_Isend(&localGrid[1 * cols], cols, MPI_DOUBLE,
-            upRank, TAG_DOWN, comm, &reqs[0]);
-        MPI_Irecv(&localGrid[0 * cols], cols, MPI_DOUBLE,
-            upRank, TAG_UP, comm, &reqs[1]);
-        MPI_Isend(&localGrid[localRows * cols], cols, MPI_DOUBLE,
-            downRank, TAG_UP, comm, &reqs[2]);
-        MPI_Irecv(&localGrid[(localRows + 1) * cols], cols, MPI_DOUBLE,
-            downRank, TAG_DOWN, comm, &reqs[3]);
-
-        for (int i = 2; i <= localRows - 1; i++) {
-            for (int j = 1; j < cols - 1; j++) {
-                double center = localGrid[i * cols + j];
-                double up = localGrid[(i - 1) * cols + j];
-                double down = localGrid[(i + 1) * cols + j];
-                double left = localGrid[i * cols + (j - 1)];
-                double right = localGrid[i * cols + (j + 1)];
-                newGrid[i * cols + j] =
-                    center + alpha * (up + down + left + right - 4.0 * center);
-            }
-        }
-
-        MPI_Waitall(4, reqs, MPI_STATUSES_IGNORE);
-
-        for (int i : {1, localRows}) {
-            for (int j = 1; j < cols - 1; j++) {
-                double center = localGrid[i * cols + j];
-                double up = localGrid[(i - 1) * cols + j];
-                double down = localGrid[(i + 1) * cols + j];
-                double left = localGrid[i * cols + (j - 1)];
-                double right = localGrid[i * cols + (j + 1)];
-                newGrid[i * cols + j] =
-                    center + alpha * (up + down + left + right - 4.0 * center);
-            }
-        }
-
-        if (rank == 0)
-            for (int j = 0; j < cols; j++)
-                newGrid[1 * cols + j] = 100.0;
-
-        if (rank == size - 1)
-            for (int j = 0; j < cols; j++)
-                newGrid[localRows * cols + j] = 100.0;
-
-        for (int i = 1; i <= localRows; i++) {
-            newGrid[i * cols + 0] = 50.0;
-            newGrid[i * cols + (cols - 1)] = 50.0;
-        }
-
-        swap(localGrid, newGrid);
-    }
-
-    MPI_Gatherv(
-        &localGrid[1 * cols],
-        localRows * cols,
-        MPI_DOUBLE,
-        rank == 0 ? fullGrid.data() : nullptr,
-        sendcounts.data(), displs.data(),
-        MPI_DOUBLE, 0, comm
-    );
-
-    if (rank == 0) {
-        cout << "\n[Heat Diffusion] Final grid sample (top-left 5x5):\n";
-        int printRows = min(5, rows);
-        int printCols = min(5, cols);
-        for (int i = 0; i < printRows; i++) {
-            for (int j = 0; j < printCols; j++)
-                cout << fullGrid[i * cols + j] << "\t";
-            cout << "\n";
-        }
-    }
-
-    MPI_Comm_free(&boundary_comm);
-    return fullGrid;
-}
-
-// ============================================================
 //  MATRIX MULTIPLICATION — Master Worker
-// ============================================================
+
 void matrix_multiply_2D(int N, int K, int M,
     double* A, double* B, double* C,
     MPI_Comm comm)

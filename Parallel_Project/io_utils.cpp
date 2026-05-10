@@ -2,19 +2,18 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 using namespace std;
 
 Matrix readMatrixFromFile(const std::string& filename) {
     std::ifstream file(filename);
 
-    if (!file) {
-        std::cerr << "Error opening file: " << filename << std::endl;
-        exit(1);
-    }
+    // ✅ Throw instead of exit so main can catch and recover
+    if (!file)
+        throw std::runtime_error("File not found: " + filename);
 
     std::vector<double> values;
-    int cols = 0;
-    int rows = 0;
+    int cols = 0, rows = 0;
     std::string line;
 
     while (std::getline(file, line)) {
@@ -29,19 +28,18 @@ Matrix readMatrixFromFile(const std::string& filename) {
             lineCount++;
         }
 
+        if (lineCount == 0) continue;
+
         if (rows == 0)
             cols = lineCount;
-        else if (lineCount != cols) {
-            std::cerr << "Error: inconsistent row sizes in matrix file\n";
-            exit(1);
-        }
+        else if (lineCount != cols)
+            throw std::runtime_error(
+                "Inconsistent row sizes in file: " + filename);
         rows++;
     }
 
-    if (rows == 0 || cols == 0) {
-        std::cerr << "Error: empty or invalid matrix file\n";
-        exit(1);
-    }
+    if (rows == 0 || cols == 0)
+        throw std::runtime_error("Empty or invalid matrix file: " + filename);
 
     Matrix mat;
     mat.rows = rows;
@@ -50,18 +48,14 @@ Matrix readMatrixFromFile(const std::string& filename) {
     return mat;
 }
 
-
 IntMatrix readIntMatrixFromFile(const std::string& filename) {
     std::ifstream file(filename);
 
-    if (!file) {
-        std::cerr << "Error opening file: " << filename << std::endl;
-        exit(1);
-    }
+    if (!file)
+        throw std::runtime_error("File not found: " + filename);
 
     std::vector<int> values;
-    int cols = 0;
-    int rows = 0;
+    int cols = 0, rows = 0;
     std::string line;
 
     while (std::getline(file, line)) {
@@ -72,27 +66,26 @@ IntMatrix readIntMatrixFromFile(const std::string& filename) {
         int lineCount = 0;
 
         while (ss >> val) {
-            if (val != 0 && val != 1) {
-                std::cerr << "Error: Game of Life file must contain only 0 and 1\n";
-                exit(1);
-            }
+            if (val != 0 && val != 1)
+                throw std::runtime_error(
+                    "Game of Life file must contain only 0 and 1: "
+                    + filename);
             values.push_back(val);
             lineCount++;
         }
 
+        if (lineCount == 0) continue;
+
         if (rows == 0)
             cols = lineCount;
-        else if (lineCount != cols) {
-            std::cerr << "Error: inconsistent row sizes in pattern file\n";
-            exit(1);
-        }
+        else if (lineCount != cols)
+            throw std::runtime_error(
+                "Inconsistent row sizes in file: " + filename);
         rows++;
     }
 
-    if (rows == 0 || cols == 0) {
-        std::cerr << "Error: empty or invalid pattern file\n";
-        exit(1);
-    }
+    if (rows == 0 || cols == 0)
+        throw std::runtime_error("Empty or invalid pattern file: " + filename);
 
     IntMatrix mat;
     mat.rows = rows;

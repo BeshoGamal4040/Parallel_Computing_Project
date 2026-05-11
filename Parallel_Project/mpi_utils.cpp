@@ -51,41 +51,48 @@ vector<int> game_of_life(int rows, int cols, int iterations,
     MPI_Comm_size(comm, &size);
 
     
-    int color = rank % 2;
-    MPI_Comm parity_comm;
-    MPI_Comm_split(comm, color, rank, &parity_comm);
+    int activeSize = min(size, rows);
+    int color = (rank < activeSize) ? 0 : MPI_UNDEFINED;
+    MPI_Comm active_comm;
+    MPI_Comm_split(comm, color, rank, &active_comm);
 
-  
-    Block block = getBlock(rank, size, rows);
+    
+    if (color == MPI_UNDEFINED) {
+        return vector<int>();
+    }
+
+    
+    int activeRank, activeTotal;
+    MPI_Comm_rank(active_comm, &activeRank);
+    MPI_Comm_size(active_comm, &activeTotal);
+
+    Block block = getBlock(activeRank, activeTotal, rows);
     int localRows = block.numRows;
 
-  
     vector<int> localGrid((localRows + 2) * cols, 0);
     vector<int> newGrid((localRows + 2) * cols, 0);
 
     
-    vector<int> sendcounts(size), displs(size);
+    vector<int> sendcounts(activeTotal), displs(activeTotal);
     {
         int offset = 0;
-        for (int p = 0; p < size; p++) {
-            Block b = getBlock(p, size, rows);
+        for (int p = 0; p < activeTotal; p++) {
+            Block b = getBlock(p, activeTotal, rows);
             sendcounts[p] = b.numRows * cols;
             displs[p] = offset;
             offset += b.numRows * cols;
         }
     }
 
-    
     MPI_Scatterv(
-        rank == 0 ? initialGrid.data() : nullptr,
+        activeRank == 0 ? initialGrid.data() : nullptr,
         sendcounts.data(), displs.data(), MPI_INT,
         &localGrid[1 * cols],
         localRows * cols,
-        MPI_INT, 0, comm
+        MPI_INT, 0, active_comm
     );
 
-    
-    if (rank == 0) {
+    if (activeRank == 0) {
         cout << "\n=== Initial State (Iteration 0) ===\n";
         for (int i = 0; i < rows; i++) {
             for (int j = 0; j < cols; j++)
@@ -95,10 +102,9 @@ vector<int> game_of_life(int rows, int cols, int iterations,
         cout << "\n";
     }
 
-    int upRank = (rank == 0) ? MPI_PROC_NULL : rank - 1;
-    int downRank = (rank == size - 1) ? MPI_PROC_NULL : rank + 1;
+    int upRank = (activeRank == 0) ? MPI_PROC_NULL : activeRank - 1;
+    int downRank = (activeRank == activeTotal - 1) ? MPI_PROC_NULL : activeRank + 1;
 
-    
     vector<int> fullGrid(rows * cols, 0);
 
     for (int iter = 0; iter < iterations; iter++) {
@@ -106,82 +112,75 @@ vector<int> game_of_life(int rows, int cols, int iterations,
         
         MPI_Request reqs[4];
 
-        MPI_Isend(&localGrid[1 * cols], cols, MPI_INT,
-            upRank, TAG_DOWN, comm, &reqs[0]);
-        MPI_Irecv(&localGrid[0], cols, MPI_INT,
-            upRank, TAG_UP, comm, &reqs[1]);
-        MPI_Isend(&localGrid[localRows * cols], cols, MPI_INT,
-            downRank, TAG_UP, comm, &reqs[2]);
-        MPI_Irecv(&localGrid[(localRows + 1) * cols], cols, MPI_INT,
-            downRank, TAG_DOWN, comm, &reqs[3]);
+        MPI_Isend(&localGrid[1 * cols], cols, MPI_INT, upRank, TAG_DOWN, active_comm, &reqs[0]);
+        MPI_Irecv(&localGrid[0], cols, MPI_INT, upRank, TAG_UP, active_comm, &reqs[1]);
+        MPI_Isend(&localGrid[localRows * cols], cols, MPI_INT, downRank, TAG_UP, active_comm, &reqs[2]);
+        MPI_Irecv(&localGrid[(localRows + 1) * cols], cols, MPI_INT, downRank, TAG_DOWN, active_comm, &reqs[3]);
 
         
         for (int i = 2; i <= localRows - 1; i++) {
             for (int j = 0; j < cols; j++) {
                 int alive = 0;
-                for (int di = -1; di <= 1; di++) {
+                for (int di = -1; di <= 1; di++)
                     for (int dj = -1; dj <= 1; dj++) {
                         if (di == 0 && dj == 0) continue;
                         int ni = i + di;
                         int nj = (j + dj + cols) % cols;
                         alive += localGrid[ni * cols + nj];
                     }
-                }
                 int cell = localGrid[i * cols + j];
-                if (cell == 1 && (alive == 2 || alive == 3)) newGrid[i * cols + j] = 1;
-                else if (cell == 0 && alive == 3)                 newGrid[i * cols + j] = 1;
-                else                                               newGrid[i * cols + j] = 0;
+                newGrid[i * cols + j] =
+                    (cell == 1 && (alive == 2 || alive == 3)) ? 1 :
+                    (cell == 0 && alive == 3) ? 1 : 0;
             }
         }
 
-       
         MPI_Waitall(4, reqs, MPI_STATUSES_IGNORE);
 
        
         for (int i : {1, localRows}) {
             for (int j = 0; j < cols; j++) {
                 int alive = 0;
-                for (int di = -1; di <= 1; di++) {
+                for (int di = -1; di <= 1; di++)
                     for (int dj = -1; dj <= 1; dj++) {
                         if (di == 0 && dj == 0) continue;
                         int ni = i + di;
                         int nj = (j + dj + cols) % cols;
                         alive += localGrid[ni * cols + nj];
                     }
-                }
                 int cell = localGrid[i * cols + j];
-                if (cell == 1 && (alive == 2 || alive == 3)) newGrid[i * cols + j] = 1;
-                else if (cell == 0 && alive == 3)                 newGrid[i * cols + j] = 1;
-                else                                               newGrid[i * cols + j] = 0;
+                newGrid[i * cols + j] =
+                    (cell == 1 && (alive == 2 || alive == 3)) ? 1 :
+                    (cell == 0 && alive == 3) ? 1 : 0;
             }
         }
 
         swap(localGrid, newGrid);
 
-        
-        MPI_Gatherv(
-            &localGrid[1 * cols],
-            localRows * cols,
-            MPI_INT,
-            rank == 0 ? fullGrid.data() : nullptr,
-            sendcounts.data(), displs.data(),
-            MPI_INT, 0, comm
-        );
-
-        if (rank == 0) {
-            cout << "=== Iteration " << iter + 1 << " ===\n";
-            for (int i = 0; i < rows; i++) {
-                for (int j = 0; j < cols; j++)
-                    cout << fullGrid[i * cols + j] << " ";
-                cout << "\n";
-            }
-            cout << "\n";
-        }
-
-        MPI_Barrier(comm);
+     
     }
 
-    MPI_Comm_free(&parity_comm);
+    
+    MPI_Gatherv(
+        &localGrid[1 * cols],
+        localRows * cols,
+        MPI_INT,
+        activeRank == 0 ? fullGrid.data() : nullptr,
+        sendcounts.data(), displs.data(),
+        MPI_INT, 0, active_comm
+    );
+
+    if (activeRank == 0) {
+        cout << "=== Final State (after " << iterations << " iterations) ===\n";
+        for (int i = 0; i < rows; i++) {
+            for (int j = 0; j < cols; j++)
+                cout << fullGrid[i * cols + j] << " ";
+            cout << "\n";
+        }
+        cout << "\n";
+    }
+
+    MPI_Comm_free(&active_comm);
     return fullGrid;
 }
 

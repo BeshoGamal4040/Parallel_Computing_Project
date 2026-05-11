@@ -208,7 +208,7 @@ int main(int argc, char** argv) {
 
         MPI_Barrier(MPI_COMM_WORLD);
 
-        //  Run Game of Life 
+        // Game of Life 
         if (choice == GAME_OF_LIFE) {
             vector<int> initialGrid(rows * cols, 0);
             if (rank == 0)

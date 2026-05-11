@@ -8,7 +8,7 @@ using namespace std;
 Matrix readMatrixFromFile(const std::string& filename) {
     std::ifstream file(filename);
 
-    // ✅ Throw instead of exit so main can catch and recover
+    
     if (!file)
         throw std::runtime_error("File not found: " + filename);
 

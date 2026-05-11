@@ -185,7 +185,7 @@ vector<int> game_of_life(int rows, int cols, int iterations,
 }
 
 
-//  MATRIX MULTIPLICATION — Master Worker
+//  MATRIX MULTIPLICATION 
 
 void matrix_multiply_2D(int N, int K, int M,
     double* A, double* B, double* C,
